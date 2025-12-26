@@ -14,7 +14,7 @@ smart-download/
 │   ├── smart-downloadd/     # Daemon entry point
 │   │   └── main.go          # 99 lines - initialization, dependency checks
 │   └── smd/                 # CLI client tool
-│       └── main.go          # 240 lines - flag parsing, commands
+│       └── main.go          # 466 lines - flag parsing, commands (add, convert, status, list, stats)
 ├── internal/
 │   ├── daemon/              # Daemon core
 │   │   ├── queue.go         # Queue manager with worker pool (206 lines)
@@ -98,6 +98,7 @@ Infrastructure Layer (internal/downloader, internal/postprocessor, internal/repo
 
 ### Data Flow
 
+**Queue-based downloads (smd add):**
 ```
 CLI (smd) → Unix Socket → Daemon Handlers → Queue Manager
                                                   ↓
@@ -109,6 +110,17 @@ CLI (smd) → Unix Socket → Daemon Handlers → Queue Manager
                                                   ↓
                                             Update DB + Notify
 ```
+
+**Local file conversion (smd convert):**
+```
+CLI (smd convert) → Direct FFmpeg Processor
+                           ↓
+                    WhatsApp MP4 Conversion
+                           ↓
+                    Output File (same directory)
+```
+
+Note: `smd convert` bypasses the daemon and processes files locally for immediate conversion without queue overhead.
 
 ## Development Environment
 
@@ -310,6 +322,97 @@ ffmpeg -i input.mp4 -ss 00:10 -to 00:30 -c copy output.mp4
 
 **avoid_negative_ts:** Ensures proper timestamp handling
 
+## Local File Conversion (smd convert)
+
+The `convert` command provides local file processing without daemon involvement.
+
+### Implementation (`cmd/smd/main.go:282-465`)
+
+**Architecture:**
+- Bypasses daemon and Unix socket entirely
+- Direct FFmpeg processor instantiation
+- Synchronous processing (blocks until complete)
+- No database persistence (files only)
+
+**Key functions:**
+```go
+func handleConvert(args []string) {
+    // Parse flags: --recursive, --output, --check-only
+    // Collect video files from paths/directories
+    // Process each file with progress display
+    // Show conversion summary
+}
+
+func collectVideoFiles(paths []string, recursive bool) []string {
+    // Detect directories vs files
+    // Filter by video extensions (11 formats)
+    // Recursive traversal with filepath.Walk
+    // Deduplication with seen map
+}
+```
+
+**Supported formats:**
+- `.mp4`, `.mkv`, `.avi`, `.mov`, `.webm`, `.flv`, `.wmv`, `.m4v`, `.mpg`, `.mpeg`, `.3gp`
+
+**Processing pipeline:**
+1. Collect input files (paths, globs, directories)
+2. Filter by video extension
+3. For each file:
+   - Check WhatsApp compatibility with `IsWhatsAppCompatible()`
+   - Skip if already compatible
+   - Convert with `ConvertToWhatsAppMP4()` if needed
+   - Track statistics (converted, compatible, failed)
+4. Display summary
+
+**Output naming:**
+- Same directory as input: `{name}_whatsapp.mp4`
+- Custom output directory: `--output /path/` → `/path/{name}_whatsapp.mp4`
+
+**Flags:**
+- `--recursive`: Process subdirectories
+- `--output <dir>`: Custom output directory
+- `--check-only`: Check compatibility without converting
+- `--clip-start <time>`: Start time for clipping (HH:MM:SS or seconds)
+- `--clip-end <time>`: End time for clipping (HH:MM:SS or seconds)
+
+**Usage examples:**
+```bash
+# Single file
+smd convert video.mp4
+
+# Multiple files (shell expansion)
+smd convert *.mp4
+
+# Directory (non-recursive)
+smd convert /path/to/videos/
+
+# Recursive processing
+smd convert /path/to/videos/ --recursive
+
+# Check-only mode
+smd convert /path/ --check-only
+
+# Custom output
+smd convert video.mp4 --output /tmp/
+
+# Clipping (extract segment)
+smd convert video.mp4 --clip-start 10 --clip-end 30
+smd convert video.mp4 --clip-start 00:01:00 --clip-end 00:02:00
+```
+
+**Clipping feature:**
+- Uses FFmpeg's `ClipVideo()` before WhatsApp conversion
+- Supports both seconds (e.g., `10`) and HH:MM:SS format (e.g., `00:01:00`)
+- Output filename includes clip range: `{name}_clip_{start}_{end}_whatsapp.mp4`
+- Example: `video_clip_10_30_whatsapp.mp4` or `video_clip_000100_000200_whatsapp.mp4`
+- Temporary clipped file is automatically cleaned up after conversion
+
+**Design rationale:**
+- **Why bypass daemon?** Local file conversion is synchronous, instant feedback desired
+- **Why no database?** No queue tracking needed, files already exist locally
+- **Why same directory default?** User expects output next to source (common FFmpeg pattern)
+- **Why clip before convert?** Reduces processing time by converting only the needed segment
+
 ## Unix Socket Protocol
 
 ### Request Format
@@ -458,6 +561,15 @@ smd add https://youtube.com/watch?v=xxx --clip-start 10 --clip-end 30
 
 # Test GIF
 smd add https://youtube.com/watch?v=xxx --gif
+
+# Test local file conversion
+smd convert /path/to/video.mp4
+
+# Test directory conversion
+smd convert /path/to/videos/ --recursive
+
+# Test convert with clipping
+smd convert /path/to/video.mp4 --clip-start 10 --clip-end 30
 
 # Check logs
 tail -f ~/.local/share/smart-download/daemon.log  # if logging enabled
@@ -676,6 +788,7 @@ Closes #123
 - ✅ Clipboard integration
 - ✅ SQLite persistence
 - ✅ Unix socket IPC
+- ✅ Local file conversion (bypass daemon for existing files)
 
 ### Known Limitations
 

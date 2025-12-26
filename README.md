@@ -63,6 +63,11 @@ systemctl --user status smart-downloadd
 smd add https://youtube.com/watch?v=xxx
 smd https://youtube.com/watch?v=xxx  # shorthand
 
+# Convert local files to WhatsApp MP4
+smd convert video.mp4
+smd convert *.mp4
+smd convert /path/to/videos/ --recursive
+
 # Check status
 smd status 123
 
@@ -169,6 +174,69 @@ smd add <url> --clip-start 00:01:30 --clip-end 00:02:00
 Example output:
 ```
 youtube_25122025_Me_at_the_zoo_clip_5_10_whatsapp.mp4  # 5 second clip
+```
+
+### Local File Conversion
+
+Convert existing video files to WhatsApp-compatible MP4 format without downloading:
+
+```bash
+# Convert single file
+smd convert video.mp4
+
+# Convert multiple files
+smd convert video1.mp4 video2.mkv video3.avi
+
+# Convert all videos in directory
+smd convert /path/to/videos/
+
+# Convert recursively (includes subdirectories)
+smd convert /path/to/videos/ --recursive
+
+# Check which files need conversion (no actual conversion)
+smd convert /path/to/videos/ --check-only
+
+# Specify output directory
+smd convert video.mp4 --output /path/to/output/
+
+# Clip and convert (extract segment)
+smd convert video.mp4 --clip-start 10 --clip-end 30
+smd convert video.mp4 --clip-start 00:01:00 --clip-end 00:02:00
+```
+
+**Features**:
+- Processes local video files directly (no daemon queue)
+- Smart compatibility detection (skips already-compatible files)
+- Supports 11 video formats (.mp4, .mkv, .avi, .mov, .webm, .flv, .wmv, .m4v, .mpg, .mpeg, .3gp)
+- Progress reporting with file counts
+- Conversion summary statistics
+- Video clipping with `--clip-start` and `--clip-end` (supports both seconds and HH:MM:SS format)
+
+**Supported formats**: All major video formats are auto-detected and converted to H.264 + AAC
+
+Example output:
+```
+Found 3 video file(s)
+
+[1/3] Processing: video.mkv
+  → Converting to WhatsApp MP4...
+    Reason: video codec is hevc (needs h264)
+  ✓ Converted: video_whatsapp.mp4
+
+[2/3] Processing: clip.mp4
+  ✓ Already compatible (H.264 + AAC)
+
+[3/3] Processing: recording.avi
+  → Converting to WhatsApp MP4...
+    Reason: video codec is mpeg4 (needs h264)
+  ✓ Converted: recording_whatsapp.mp4
+
+==================================================
+Conversion Summary:
+  Total files:      3
+  Converted:        2
+  Already compatible: 1
+==================================================
 ```
 
 ## Architecture
