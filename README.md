@@ -200,8 +200,10 @@ smd convert /path/to/videos/ --check-only
 smd convert video.mp4 --output /path/to/output/
 
 # Clip and convert (extract segment)
-smd convert video.mp4 --clip-start 10 --clip-end 30
-smd convert video.mp4 --clip-start 00:01:00 --clip-end 00:02:00
+smd convert video.mp4 --clip-start 10 --clip-end 30          # Seconds
+smd convert video.mp4 --clip-start 00:01:00 --clip-end 00:02:00  # HH:MM:SS
+smd convert video.mp4 --clip-start 1m --clip-end 2m          # Go duration format
+smd convert video.mp4 --clip-start 30s --clip-end 1m30s      # Mixed format
 ```
 
 **Features**:
@@ -210,7 +212,7 @@ smd convert video.mp4 --clip-start 00:01:00 --clip-end 00:02:00
 - Supports 11 video formats (.mp4, .mkv, .avi, .mov, .webm, .flv, .wmv, .m4v, .mpg, .mpeg, .3gp)
 - Progress reporting with file counts
 - Conversion summary statistics
-- Video clipping with `--clip-start` and `--clip-end` (supports both seconds and HH:MM:SS format)
+- Video clipping with `--clip-start` and `--clip-end` (supports multiple time formats: seconds, HH:MM:SS, Go duration like 1m30s)
 
 **Supported formats**: All major video formats are auto-detected and converted to H.264 + AAC
 

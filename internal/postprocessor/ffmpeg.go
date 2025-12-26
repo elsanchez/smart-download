@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/elsanchez/smart-download/internal/domain"
 )
@@ -306,21 +307,62 @@ func (f *FFmpegProcessor) OptimizeGIF(ctx context.Context, inputPath string) (st
 	return f.ConvertToGIF(ctx, inputPath, maxWidth, "", "")
 }
 
+// parseTimeToSeconds convierte varios formatos de tiempo a segundos
+// Soporta:
+// - Duraciones Go: "1m30s", "90s", "1h4m10s"
+// - Segundos: "90"
+// - HH:MM:SS: "00:01:30"
+func parseTimeToSeconds(timeStr string) (string, error) {
+	// Intentar parsear como duración Go (1m30s, 90s, 1h4m10s)
+	if duration, err := time.ParseDuration(timeStr); err == nil {
+		return fmt.Sprintf("%.3f", duration.Seconds()), nil
+	}
+
+	// Verificar si es un número simple (segundos)
+	if _, err := strconv.ParseFloat(timeStr, 64); err == nil {
+		return timeStr, nil
+	}
+
+	// Verificar si es formato HH:MM:SS
+	parts := strings.Split(timeStr, ":")
+	if len(parts) == 3 {
+		h, err1 := strconv.Atoi(parts[0])
+		m, err2 := strconv.Atoi(parts[1])
+		s, err3 := strconv.ParseFloat(parts[2], 64)
+		if err1 == nil && err2 == nil && err3 == nil {
+			totalSeconds := float64(h*3600 + m*60) + s
+			return fmt.Sprintf("%.3f", totalSeconds), nil
+		}
+	}
+
+	return "", fmt.Errorf("invalid time format: %s (expected: 1m30s, 90, or 00:01:30)", timeStr)
+}
+
 // ClipVideo extrae un segmento del video
 func (f *FFmpegProcessor) ClipVideo(ctx context.Context, inputPath, startTime, endTime string) (string, error) {
+	// Normalizar tiempos a segundos
+	startSeconds, err := parseTimeToSeconds(startTime)
+	if err != nil {
+		return "", fmt.Errorf("invalid start time: %w", err)
+	}
+	endSeconds, err := parseTimeToSeconds(endTime)
+	if err != nil {
+		return "", fmt.Errorf("invalid end time: %w", err)
+	}
+
 	// Generar path de salida
 	ext := filepath.Ext(inputPath)
 	base := strings.TrimSuffix(inputPath, ext)
 
-	// Limpiar timestamps para nombre de archivo
+	// Limpiar timestamps para nombre de archivo (usar formato original)
 	startClean := strings.ReplaceAll(startTime, ":", "-")
 	endClean := strings.ReplaceAll(endTime, ":", "-")
 	outputPath := fmt.Sprintf("%s_clip_%s_%s%s", base, startClean, endClean, ext)
 
 	args := []string{
 		"-i", inputPath,
-		"-ss", startTime,
-		"-to", endTime,
+		"-ss", startSeconds,
+		"-to", endSeconds,
 		"-hide_banner",
 		"-loglevel", "error",
 		"-c", "copy", // Stream copy (sin re-encodear)

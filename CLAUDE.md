@@ -372,8 +372,13 @@ func collectVideoFiles(paths []string, recursive bool) []string {
 - `--recursive`: Process subdirectories
 - `--output <dir>`: Custom output directory
 - `--check-only`: Check compatibility without converting
-- `--clip-start <time>`: Start time for clipping (HH:MM:SS or seconds)
-- `--clip-end <time>`: End time for clipping (HH:MM:SS or seconds)
+- `--clip-start <time>`: Start time for clipping (multiple formats supported)
+- `--clip-end <time>`: End time for clipping (multiple formats supported)
+
+**Time format support** (using Go's `time.ParseDuration()`):
+- Seconds: `10`, `90`
+- Go duration: `30s`, `1m`, `1m30s`, `1h4m10s`
+- HH:MM:SS: `00:01:30`, `01:04:10`
 
 **Usage examples:**
 ```bash
@@ -395,16 +400,22 @@ smd convert /path/ --check-only
 # Custom output
 smd convert video.mp4 --output /tmp/
 
-# Clipping (extract segment)
-smd convert video.mp4 --clip-start 10 --clip-end 30
-smd convert video.mp4 --clip-start 00:01:00 --clip-end 00:02:00
+# Clipping (extract segment - multiple time formats)
+smd convert video.mp4 --clip-start 10 --clip-end 30              # Seconds
+smd convert video.mp4 --clip-start 00:01:00 --clip-end 00:02:00  # HH:MM:SS
+smd convert video.mp4 --clip-start 1m --clip-end 2m              # Go duration
+smd convert video.mp4 --clip-start 30s --clip-end 1m30s          # Mixed
 ```
 
 **Clipping feature:**
 - Uses FFmpeg's `ClipVideo()` before WhatsApp conversion
-- Supports both seconds (e.g., `10`) and HH:MM:SS format (e.g., `00:01:00`)
+- **Time format normalization** via `parseTimeToSeconds()`:
+  - Tries `time.ParseDuration()` first (Go duration: `1m30s`, `30s`, `1h4m10s`)
+  - Falls back to plain seconds (e.g., `90`)
+  - Falls back to HH:MM:SS parsing (e.g., `00:01:30`)
+  - All formats normalized to seconds before passing to FFmpeg
 - Output filename includes clip range: `{name}_clip_{start}_{end}_whatsapp.mp4`
-- Example: `video_clip_10_30_whatsapp.mp4` or `video_clip_000100_000200_whatsapp.mp4`
+- Examples: `video_clip_10_30_whatsapp.mp4`, `video_clip_1m_2m_whatsapp.mp4`
 - Temporary clipped file is automatically cleaned up after conversion
 
 **Design rationale:**
@@ -568,8 +579,10 @@ smd convert /path/to/video.mp4
 # Test directory conversion
 smd convert /path/to/videos/ --recursive
 
-# Test convert with clipping
+# Test convert with clipping (various time formats)
 smd convert /path/to/video.mp4 --clip-start 10 --clip-end 30
+smd convert /path/to/video.mp4 --clip-start 1m --clip-end 2m
+smd convert /path/to/video.mp4 --clip-start 30s --clip-end 1m30s
 
 # Check logs
 tail -f ~/.local/share/smart-download/daemon.log  # if logging enabled

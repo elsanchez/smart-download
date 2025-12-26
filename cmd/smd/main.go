@@ -84,7 +84,8 @@ Examples:
   smd convert *.mp4
   smd convert /path/to/videos/ --recursive
   smd convert video.mp4 --clip-start 10 --clip-end 30
-  smd convert video.mp4 --clip-start 00:01:00 --clip-end 00:02:00
+  smd convert video.mp4 --clip-start 1m --clip-end 2m
+  smd convert video.mp4 --clip-start 30s --clip-end 1m30s
   smd status 123
   smd list 10
   smd stats`)
