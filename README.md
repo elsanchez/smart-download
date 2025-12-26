@@ -8,7 +8,7 @@ Professional video/media download manager with queue system, cookie management, 
 - ✅ **Platform Detection**: Auto-detects 12+ platforms (YouTube, Twitter, Instagram, etc.)
 - ✅ **Cookie Management**: Account rotation for private content
 - ✅ **Smart Naming**: Auto-generates filenames with platform/username/date
-- ✅ **Post-Processing**: WhatsApp MP4 conversion, GIF creation, video clipping (coming soon)
+- ✅ **Post-Processing**: Automatic WhatsApp MP4 conversion, GIF creation, video clipping
 - ✅ **Desktop Integration**: Clipboard copy, desktop notifications
 - ✅ **SQLite Database**: Persistent queue and download history
 - ✅ **Unix Socket IPC**: Fast communication between daemon and CLI
@@ -77,16 +77,115 @@ smd stats
 smd version
 ```
 
+### Post-Processing Options
+
+```bash
+# Automatic WhatsApp MP4 conversion (enabled by default)
+smd add https://youtube.com/watch?v=xxx
+
+# Skip auto-conversion
+smd add https://youtube.com/watch?v=xxx --no-convert
+
+# Clip video segment (HH:MM:SS or seconds)
+smd add https://youtube.com/watch?v=xxx --clip-start 10 --clip-end 30
+smd add https://youtube.com/watch?v=xxx --clip-start 00:01:30 --clip-end 00:02:00
+
+# Convert to GIF (with custom width)
+smd add https://youtube.com/watch?v=xxx --gif --gif-width 480
+
+# Combine clipping + GIF
+smd add https://youtube.com/watch?v=xxx --clip-start 5 --clip-end 10 --gif
+
+# Download with specific resolution
+smd add https://youtube.com/watch?v=xxx --resolution 720p
+
+# Extract audio only
+smd add https://youtube.com/watch?v=xxx --audio-only
+```
+
+### WhatsApp MP4 Conversion
+
+All downloaded videos are **automatically converted** to WhatsApp-compatible MP4 format:
+
+- **Video codec**: H.264 (libx264)
+- **Audio codec**: AAC
+- **Max resolution**: 1920x1080 (auto-scaled if needed)
+- **Faststart**: Enabled for web streaming
+- **Smart processing**: Stream copy when already compatible (no re-encoding)
+
+Example output:
+```
+youtube_25122025_Me_at_the_zoo_whatsapp.mp4  # Auto-converted
+```
+
+To skip conversion:
+```bash
+smd add <url> --no-convert
+```
+
+### GIF Conversion
+
+Create high-quality GIFs with optimized palettes:
+
+```bash
+# Default width (480px)
+smd add https://youtube.com/watch?v=xxx --gif
+
+# Custom width
+smd add https://youtube.com/watch?v=xxx --gif --gif-width 320
+
+# Clip + GIF (useful for short animations)
+smd add https://youtube.com/watch?v=xxx --clip-start 5 --clip-end 10 --gif
+```
+
+**Features**:
+- Two-pass palette generation for better colors
+- 15 FPS for smooth playback
+- Bayer dithering
+- Configurable width (maintains aspect ratio)
+
+Example output:
+```
+youtube_25122025_Me_at_the_zoo.gif  # 480x360, 30MB
+```
+
+### Video Clipping
+
+Extract specific segments without re-encoding:
+
+```bash
+# Using seconds
+smd add <url> --clip-start 10 --clip-end 30
+
+# Using HH:MM:SS format
+smd add <url> --clip-start 00:01:30 --clip-end 00:02:00
+```
+
+**Features**:
+- Fast stream copy (no quality loss)
+- Supports both time formats
+- Auto-converts to WhatsApp MP4 after clipping
+
+Example output:
+```
+youtube_25122025_Me_at_the_zoo_clip_5_10_whatsapp.mp4  # 5 second clip
+```
+
 ## Architecture
 
 ```
 smart-downloadd (daemon)
   ├── Unix Socket Server (/run/user/UID/smart-download.sock)
   ├── Queue Manager (3 parallel workers)
+  │   └── Processing pipeline: pending → downloading → processing → completed
   ├── Database Layer (SQLite with migrations)
   ├── Downloader Manager
   │   ├── yt-dlp wrapper (1800+ sites)
   │   └── gallery-dl wrapper (100+ sites)
+  ├── Post-Processor (FFmpeg)
+  │   ├── WhatsApp MP4 converter (H.264 + AAC)
+  │   ├── GIF generator (palette-based)
+  │   └── Video clipper (stream copy)
   └── Repository Pattern (clean architecture)
 
 smd (CLI client)
@@ -96,9 +195,14 @@ smd (CLI client)
 ## Directory Structure
 
 ```
-~/.local/share/smart-download/   # Database
+~/.local/share/smart-download/   # Database and temp files
+  ├── downloads.db               # SQLite database
+  └── temp/                      # Temporary files (palettes, etc.)
 ~/Downloads/download_video/       # Output files
   ├── youtube/
+  │   ├── video_whatsapp.mp4    # Auto-converted
+  │   ├── video_clip_5_10_whatsapp.mp4
+  │   └── video.gif
   ├── twitter/
   ├── instagram/
   └── [platform]/
@@ -187,11 +291,25 @@ CREATE TABLE accounts (
     "url": "https://youtube.com/watch?v=xxx",
     "options": {
       "resolution": "1080p",
-      "audio_only": false
+      "audio_only": false,
+      "clip_start": "10",
+      "clip_end": "30",
+      "convert_to_gif": false,
+      "gif_width": 480,
+      "no_convert": false
     }
   }
 }
 ```
+
+**Options**:
+- `resolution`: Video quality (1080p, 720p, 480p)
+- `audio_only`: Extract audio only (boolean)
+- `clip_start`: Start time for clipping (HH:MM:SS or seconds)
+- `clip_end`: End time for clipping (HH:MM:SS or seconds)
+- `convert_to_gif`: Convert to GIF (boolean)
+- `gif_width`: GIF width in pixels (default: 480)
+- `no_convert`: Skip WhatsApp MP4 conversion (boolean)
 
 ### Get Status
 
