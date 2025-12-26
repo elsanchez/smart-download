@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 
@@ -52,15 +53,25 @@ func printUsage() {
 Usage: smd <command> [args]
 
 Commands:
-  add <url>        Add download to queue
-  status <id>      Get download status
-  list [limit]     List recent downloads (default: 50)
-  stats            Show queue statistics
-  version          Show version
-  help             Show this help
+  add <url> [options]  Add download to queue
+  status <id>          Get download status
+  list [limit]         List recent downloads (default: 50)
+  stats                Show queue statistics
+  version              Show version
+  help                 Show this help
+
+Add Options:
+  --clip <start> <end>  Clip video segment (format: HH:MM:SS or seconds)
+  --gif [width]         Convert to GIF (default width: 480px)
+  --no-convert          Skip auto-conversion to WhatsApp MP4
+  --resolution <res>    Video resolution (1080p, 720p, 480p)
+  --audio-only          Extract audio only
 
 Examples:
   smd add https://youtube.com/watch?v=xxx
+  smd add https://youtube.com/watch?v=xxx --clip 00:10 00:30
+  smd add https://youtube.com/watch?v=xxx --gif 480
+  smd add https://youtube.com/watch?v=xxx --no-convert
   smd https://youtube.com/watch?v=xxx          (shorthand for 'add')
   smd status 123
   smd list 10
@@ -74,10 +85,56 @@ func handleAdd(c *client.Client, args []string) {
 		os.Exit(1)
 	}
 
+	// Parse flags
+	addFlags := flag.NewFlagSet("add", flag.ExitOnError)
+	clipStart := addFlags.String("clip-start", "", "Clip start time (HH:MM:SS or seconds)")
+	clipEnd := addFlags.String("clip-end", "", "Clip end time (HH:MM:SS or seconds)")
+	convertToGIF := addFlags.Bool("gif", false, "Convert to GIF")
+	gifWidth := addFlags.Int("gif-width", 480, "GIF width in pixels")
+	noConvert := addFlags.Bool("no-convert", false, "Skip WhatsApp MP4 conversion")
+	resolution := addFlags.String("resolution", "", "Video resolution (1080p, 720p, 480p)")
+	audioOnly := addFlags.Bool("audio-only", false, "Extract audio only")
+
+	// URL es el primer argumento
 	url := args[0]
 
+	// Parse remaining args
+	if len(args) > 1 {
+		addFlags.Parse(args[1:])
+	}
+
+	// Validación de clip
+	if (*clipStart != "" && *clipEnd == "") || (*clipStart == "" && *clipEnd != "") {
+		fmt.Println("Error: Both --clip-start and --clip-end are required for clipping")
+		os.Exit(1)
+	}
+
+	// Construir options
+	options := make(map[string]interface{})
+
+	if *resolution != "" {
+		options["resolution"] = *resolution
+	}
+	if *audioOnly {
+		options["audio_only"] = true
+	}
+	if *clipStart != "" && *clipEnd != "" {
+		options["clip_start"] = *clipStart
+		options["clip_end"] = *clipEnd
+	}
+	if *convertToGIF {
+		options["convert_to_gif"] = true
+		if *gifWidth > 0 {
+			options["gif_width"] = *gifWidth
+		}
+	}
+	if *noConvert {
+		options["no_convert"] = true
+	}
+
 	payload := &client.AddDownloadPayload{
-		URL: url,
+		URL:     url,
+		Options: options,
 	}
 
 	id, err := c.AddDownload(payload)
@@ -88,6 +145,27 @@ func handleAdd(c *client.Client, args []string) {
 
 	fmt.Printf("✓ Download added with ID: %d\n", id)
 	fmt.Printf("  URL: %s\n", url)
+
+	// Mostrar opciones configuradas
+	if len(options) > 0 {
+		fmt.Println("  Options:")
+		if *clipStart != "" {
+			fmt.Printf("    Clip: %s - %s\n", *clipStart, *clipEnd)
+		}
+		if *convertToGIF {
+			fmt.Printf("    GIF: %dpx width\n", *gifWidth)
+		}
+		if *noConvert {
+			fmt.Println("    Skip WhatsApp conversion")
+		}
+		if *resolution != "" {
+			fmt.Printf("    Resolution: %s\n", *resolution)
+		}
+		if *audioOnly {
+			fmt.Println("    Audio only")
+		}
+	}
+
 	fmt.Println("  Status: pending")
 }
 

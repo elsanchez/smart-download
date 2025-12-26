@@ -10,6 +10,7 @@ import (
 
 	"github.com/elsanchez/smart-download/internal/daemon"
 	"github.com/elsanchez/smart-download/internal/downloader"
+	"github.com/elsanchez/smart-download/internal/postprocessor"
 	"github.com/elsanchez/smart-download/internal/repository/sqlite"
 	"github.com/elsanchez/smart-download/pkg/client"
 )
@@ -26,7 +27,10 @@ func main() {
 	if err := downloader.CheckDependencies(); err != nil {
 		log.Fatalf("Dependency check failed: %v", err)
 	}
-	log.Println("✓ Dependencies check passed (yt-dlp, gallery-dl)")
+	if err := postprocessor.CheckFFmpegInstalled(); err != nil {
+		log.Fatalf("FFmpeg check failed: %v", err)
+	}
+	log.Println("✓ Dependencies check passed (yt-dlp, gallery-dl, ffmpeg)")
 
 	// Obtener directorios
 	homeDir, err := os.UserHomeDir()
@@ -37,9 +41,10 @@ func main() {
 	dataDir := filepath.Join(homeDir, ".local", "share", "smart-download")
 	outputDir := filepath.Join(homeDir, "Downloads", "download_video")
 	cookiesDir := filepath.Join(homeDir, "Documents", "cookies")
+	tempDir := filepath.Join(dataDir, "temp")
 
 	// Crear directorios
-	for _, dir := range []string{dataDir, outputDir, cookiesDir} {
+	for _, dir := range []string{dataDir, outputDir, cookiesDir, tempDir} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			log.Fatalf("Failed to create directory %s: %v", dir, err)
 		}
@@ -48,6 +53,7 @@ func main() {
 	log.Printf("Data directory: %s", dataDir)
 	log.Printf("Output directory: %s", outputDir)
 	log.Printf("Cookies directory: %s", cookiesDir)
+	log.Printf("Temp directory: %s", tempDir)
 
 	// Inicializar base de datos
 	db, err := sqlite.NewDatabase(dataDir)
@@ -61,9 +67,13 @@ func main() {
 	downloaderMgr := downloader.NewManager(outputDir, cookiesDir, db.AccountRepo)
 	log.Println("✓ Downloader manager initialized")
 
+	// Crear post-processor
+	postproc := postprocessor.NewFFmpegProcessor(tempDir)
+	log.Println("✓ Post-processor initialized")
+
 	// Crear queue manager
 	workers := 3 // Configurable
-	queueMgr := daemon.NewQueueManager(db.DownloadRepo, downloaderMgr, workers)
+	queueMgr := daemon.NewQueueManager(db.DownloadRepo, downloaderMgr, postproc, workers)
 	queueMgr.Start()
 	defer queueMgr.Stop()
 	log.Printf("✓ Queue manager started (%d workers)", workers)

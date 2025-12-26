@@ -30,14 +30,20 @@ type Download struct {
 
 // DownloadOptions contiene las opciones de procesamiento
 type DownloadOptions struct {
-	ClipStart  string `json:"clip_start,omitempty"`
-	ClipEnd    string `json:"clip_end,omitempty"`
-	ToGIF      bool   `json:"to_gif,omitempty"`
-	GifWidth   int    `json:"gif_width,omitempty"`
-	GifFPS     int    `json:"gif_fps,omitempty"`
-	Resolution string `json:"resolution,omitempty"`
+	// Descarga
+	Resolution string `json:"resolution,omitempty"` // 1080p, 720p, 480p
 	AudioOnly  bool   `json:"audio_only,omitempty"`
-	NoConvert  bool   `json:"no_convert,omitempty"`
+
+	// Clipping
+	ClipStart string `json:"clip_start,omitempty"` // Formato: HH:MM:SS o SS
+	ClipEnd   string `json:"clip_end,omitempty"`   // Formato: HH:MM:SS o SS
+
+	// Conversión a GIF
+	ConvertToGIF bool `json:"convert_to_gif,omitempty"`
+	GIFWidth     int  `json:"gif_width,omitempty"` // Default: 480px
+
+	// Post-procesamiento
+	NoConvert bool `json:"no_convert,omitempty"` // Desactivar conversión automática a WhatsApp MP4
 }
 
 // IsCompleted retorna true si la descarga está completa o falló

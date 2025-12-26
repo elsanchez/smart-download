@@ -11,25 +11,28 @@ import (
 
 	"github.com/elsanchez/smart-download/internal/domain"
 	"github.com/elsanchez/smart-download/internal/downloader"
+	"github.com/elsanchez/smart-download/internal/postprocessor"
 	"github.com/elsanchez/smart-download/internal/repository"
 )
 
 // QueueManager gestiona la cola de descargas con workers paralelos
 type QueueManager struct {
-	downloadRepo repository.DownloadRepository
-	downloader   *downloader.Manager
-	workers      int
-	workerPool   chan struct{}
-	wg           sync.WaitGroup
-	ctx          context.Context
-	cancel       context.CancelFunc
-	pollInterval time.Duration
+	downloadRepo  repository.DownloadRepository
+	downloader    *downloader.Manager
+	postprocessor postprocessor.PostProcessor
+	workers       int
+	workerPool    chan struct{}
+	wg            sync.WaitGroup
+	ctx           context.Context
+	cancel        context.CancelFunc
+	pollInterval  time.Duration
 }
 
 // NewQueueManager crea un nuevo gestor de cola
 func NewQueueManager(
 	downloadRepo repository.DownloadRepository,
 	downloaderMgr *downloader.Manager,
+	postproc postprocessor.PostProcessor,
 	workers int,
 ) *QueueManager {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -39,13 +42,14 @@ func NewQueueManager(
 	}
 
 	return &QueueManager{
-		downloadRepo: downloadRepo,
-		downloader:   downloaderMgr,
-		workers:      workers,
-		workerPool:   make(chan struct{}, workers),
-		ctx:          ctx,
-		cancel:       cancel,
-		pollInterval: 5 * time.Second,
+		downloadRepo:  downloadRepo,
+		downloader:    downloaderMgr,
+		postprocessor: postproc,
+		workers:       workers,
+		workerPool:    make(chan struct{}, workers),
+		ctx:           ctx,
+		cancel:        cancel,
+		pollInterval:  5 * time.Second,
 	}
 }
 
@@ -133,7 +137,37 @@ func (q *QueueManager) processDownload(dl *domain.Download) {
 		return
 	}
 
-	// Actualizar con path de salida
+	log.Printf("Download %d downloaded to: %s", dl.ID, outputPath)
+
+	// Post-procesamiento (si aplica)
+	if q.postprocessor != nil && !dl.Options.AudioOnly {
+		needsProcessing, err := q.postprocessor.NeedsProcessing(outputPath, &dl.Options)
+		if err != nil {
+			log.Printf("Failed to check processing needs for download %d: %v", dl.ID, err)
+		}
+
+		if needsProcessing || dl.Options.ClipStart != "" || dl.Options.ConvertToGIF {
+			// Actualizar status a processing
+			if err := q.downloadRepo.UpdateStatus(q.ctx, dl.ID, domain.StatusProcessing, ""); err != nil {
+				log.Printf("Failed to update status for download %d: %v", dl.ID, err)
+			}
+
+			log.Printf("Post-processing download %d...", dl.ID)
+
+			processedPath, err := q.postprocessor.Process(q.ctx, outputPath, &dl.Options)
+			if err != nil {
+				log.Printf("Post-processing %d failed: %v", dl.ID, err)
+				q.downloadRepo.UpdateStatus(q.ctx, dl.ID, domain.StatusFailed, fmt.Sprintf("post-processing: %v", err))
+				q.sendNotification("Processing Failed", fmt.Sprintf("Failed to process: %s", outputPath))
+				return
+			}
+
+			outputPath = processedPath
+			log.Printf("Download %d post-processed to: %s", dl.ID, outputPath)
+		}
+	}
+
+	// Actualizar con path de salida final
 	if err := q.downloadRepo.UpdateOutputPath(q.ctx, dl.ID, outputPath); err != nil {
 		log.Printf("Failed to update output path for download %d: %v", dl.ID, err)
 	}
@@ -145,7 +179,7 @@ func (q *QueueManager) processDownload(dl *domain.Download) {
 	}
 
 	log.Printf("Download %d completed: %s", dl.ID, outputPath)
-	q.sendNotification("Download Complete", fmt.Sprintf("Downloaded: %s", outputPath))
+	q.sendNotification("Download Complete", fmt.Sprintf("Ready: %s", outputPath))
 
 	// Copiar path al clipboard
 	q.copyToClipboard(outputPath)
