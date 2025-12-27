@@ -6,7 +6,7 @@ Professional video/media download manager with queue system, cookie management, 
 
 - ✅ **Background Queue**: Download multiple files in parallel (3 workers by default)
 - ✅ **Platform Detection**: Auto-detects 12+ platforms (YouTube, Twitter, Instagram, etc.)
-- ✅ **Cookie Management**: Account rotation for private content
+- ✅ **Cookie Management**: TUI manager, import/export, validation, auto-use per platform
 - ✅ **Smart Naming**: Auto-generates filenames with platform/username/date
 - ✅ **Post-Processing**: Automatic WhatsApp MP4 conversion, GIF creation, video clipping
 - ✅ **Desktop Integration**: Clipboard copy, desktop notifications
@@ -71,9 +71,19 @@ smd convert /path/to/videos/ --recursive
 # Check status
 smd status 123
 
-# List recent downloads
+# List recent downloads (most recent first)
 smd list
-smd list 10  # limit to 10
+smd list 10           # limit to 10
+smd list --details    # show error messages
+
+# Cookie management
+smd cookies list      # list all accounts
+smd cookies tui       # interactive TUI manager
+smd cookies import ~/cookies.txt --platform twitter --name main
+smd cookies export twitter main ~/export.txt
+smd cookies validate  # check all cookies
+smd cookies activate twitter main
+smd cookies delete twitter main
 
 # Queue statistics
 smd stats
@@ -159,22 +169,73 @@ youtube_25122025_Me_at_the_zoo.gif  # 480x360, 30MB
 Extract specific segments without re-encoding:
 
 ```bash
-# Using seconds
-smd add <url> --clip-start 10 --clip-end 30
+# Both start and end (5 second clip)
+smd add <url> --clip-start 10s --clip-end 15s
+
+# Only start time (clip from 1 minute to end of video)
+smd add <url> --clip-start 1m
+
+# Only end time (clip from beginning to 30 seconds)
+smd add <url> --clip-end 30s
 
 # Using HH:MM:SS format
 smd add <url> --clip-start 00:01:30 --clip-end 00:02:00
+
+# Mixed formats
+smd add <url> --clip-start 1m30s --clip-end 2m
 ```
 
 **Features**:
 - Fast stream copy (no quality loss)
-- Supports both time formats
+- Flexible: use `--clip-start`, `--clip-end`, or both
+- Supports multiple time formats: seconds (30s), minutes (1m), mixed (1m30s), HH:MM:SS
+- Boundary validation with clear error messages
 - Auto-converts to WhatsApp MP4 after clipping
 
 Example output:
 ```
-youtube_25122025_Me_at_the_zoo_clip_5_10_whatsapp.mp4  # 5 second clip
+youtube_25122025_Me_at_the_zoo_clip_10s_15s_whatsapp.mp4  # Both specified
+youtube_25122025_Me_at_the_zoo_clip_1m_end_whatsapp.mp4   # Only start
+youtube_25122025_Me_at_the_zoo_clip_0_30s_whatsapp.mp4    # Only end
 ```
+
+### Cookie Management
+
+Manage authentication cookies for private content:
+
+```bash
+# Interactive TUI manager
+smd cookies tui
+
+# List all accounts with validation status
+smd cookies list
+
+# Import cookie file (Netscape format)
+smd cookies import ~/cookies.txt --platform twitter --name main --activate
+
+# Export cookies to file
+smd cookies export twitter main ~/twitter_cookies.txt
+
+# Validate all cookies (expiration + HTTP check)
+smd cookies validate
+
+# Activate/delete accounts
+smd cookies activate twitter main
+smd cookies delete twitter main
+```
+
+**TUI Features** (`smd cookies tui`):
+- List all accounts with status (✓ valid, ✗ invalid, ⭐ active)
+- Navigate with `j`/`k` or arrow keys
+- `i` - Import new cookie file
+- `v` - Validate expiration dates
+- `V` - Full HTTP validation (Shift+V)
+- `a` - Activate selected account
+- `d` - Delete selected account
+- `e` - Export selected account
+- `?` - Help
+
+**Auto-use**: Cookies are automatically used for downloads based on platform. No need to specify account per download.
 
 ### Local File Conversion
 
@@ -346,6 +407,9 @@ CREATE TABLE accounts (
     is_active INTEGER DEFAULT 0,
     last_used INTEGER,
     created_at INTEGER,
+    last_validated INTEGER,
+    validation_status TEXT,
+    validation_message TEXT,
     UNIQUE(platform, name)
 );
 ```
@@ -449,5 +513,12 @@ yt-dlp <url>
 MIT
 
 ## Version
+
+**0.2.0** - Cookie Manager & Flexible Clipping
+- TUI cookie manager with import/export/validation
+- Flexible video clipping (use --clip-start, --clip-end, or both)
+- Auto-use cookies per platform
+- List improvements (--details flag, most recent first)
+- FFmpeg clipping accuracy fixes
 
 0.1.0 - Initial release
