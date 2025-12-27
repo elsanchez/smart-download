@@ -11,6 +11,11 @@ type Account struct {
 	IsActive   bool
 	LastUsed   *time.Time
 	CreatedAt  time.Time
+
+	// Validation fields
+	ValidatedAt      *time.Time
+	ValidationStatus string
+	ValidationError  *string
 }
 
 // Platform constants para las plataformas soportadas
@@ -25,4 +30,12 @@ const (
 	PlatformTikTok      = "tiktok"
 	PlatformReddit      = "reddit"
 	PlatformSubscribeStar = "subscribestar"
+)
+
+// Validation status constants
+const (
+	ValidationStatusValid   = "valid"
+	ValidationStatusExpired = "expired"
+	ValidationStatusInvalid = "invalid"
+	ValidationStatusUnknown = "unknown"
 )

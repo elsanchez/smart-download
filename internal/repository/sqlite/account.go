@@ -27,13 +27,16 @@ func NewAccountRepository(db *sqlx.DB) *AccountRepository {
 
 // accountRow mapea la tabla SQL a struct Go
 type accountRow struct {
-	ID         int64         `db:"id"`
-	Platform   string        `db:"platform"`
-	Name       string        `db:"name"`
-	CookiePath string        `db:"cookie_path"`
-	IsActive   int           `db:"is_active"`
-	LastUsed   sql.NullInt64 `db:"last_used"`
-	CreatedAt  int64         `db:"created_at"`
+	ID               int64          `db:"id"`
+	Platform         string         `db:"platform"`
+	Name             string         `db:"name"`
+	CookiePath       string         `db:"cookie_path"`
+	IsActive         int            `db:"is_active"`
+	LastUsed         sql.NullInt64  `db:"last_used"`
+	CreatedAt        int64          `db:"created_at"`
+	ValidatedAt      sql.NullInt64  `db:"validated_at"`
+	ValidationStatus sql.NullString `db:"validation_status"`
+	ValidationError  sql.NullString `db:"validation_error"`
 }
 
 // Create inserta una nueva cuenta
@@ -230,6 +233,21 @@ func accountRowToDomain(row *accountRow) *domain.Account {
 		acc.LastUsed = &t
 	}
 
+	if row.ValidatedAt.Valid {
+		t := time.Unix(row.ValidatedAt.Int64, 0)
+		acc.ValidatedAt = &t
+	}
+
+	if row.ValidationStatus.Valid {
+		acc.ValidationStatus = row.ValidationStatus.String
+	} else {
+		acc.ValidationStatus = domain.ValidationStatusUnknown
+	}
+
+	if row.ValidationError.Valid {
+		acc.ValidationError = &row.ValidationError.String
+	}
+
 	return acc
 }
 
@@ -242,4 +260,59 @@ func accountRowsToDomain(rows []accountRow) []*domain.Account {
 	}
 
 	return accounts
+}
+
+// UpdateValidation actualiza el estado de validación de una cuenta
+func (r *AccountRepository) UpdateValidation(ctx context.Context, id int64, status string, validationErr *string) error {
+	var errStr interface{}
+	if validationErr != nil {
+		errStr = *validationErr
+	}
+
+	query := `
+		UPDATE accounts
+		SET validated_at = ?, validation_status = ?, validation_error = ?
+		WHERE id = ?
+	`
+
+	_, err := r.db.ExecContext(ctx, query, time.Now().Unix(), status, errStr, id)
+	if err != nil {
+		return fmt.Errorf("update validation: %w", err)
+	}
+
+	return nil
+}
+
+// GetExpiredAccounts obtiene todas las cuentas con cookies expiradas
+func (r *AccountRepository) GetExpiredAccounts(ctx context.Context) ([]*domain.Account, error) {
+	var rows []accountRow
+
+	query := `
+		SELECT * FROM accounts
+		WHERE validation_status = ?
+		ORDER BY platform, name
+	`
+
+	if err := r.db.SelectContext(ctx, &rows, query, domain.ValidationStatusExpired); err != nil {
+		return nil, fmt.Errorf("get expired accounts: %w", err)
+	}
+
+	return accountRowsToDomain(rows), nil
+}
+
+// GetAccountsByValidation obtiene todas las cuentas con un estado de validación específico
+func (r *AccountRepository) GetAccountsByValidation(ctx context.Context, status string) ([]*domain.Account, error) {
+	var rows []accountRow
+
+	query := `
+		SELECT * FROM accounts
+		WHERE validation_status = ?
+		ORDER BY platform, name
+	`
+
+	if err := r.db.SelectContext(ctx, &rows, query, status); err != nil {
+		return nil, fmt.Errorf("get accounts by validation: %w", err)
+	}
+
+	return accountRowsToDomain(rows), nil
 }

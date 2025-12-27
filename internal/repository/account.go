@@ -22,4 +22,9 @@ type AccountRepository interface {
 	// Gestión de cuenta activa
 	SetActive(ctx context.Context, platform, name string) error
 	UpdateLastUsed(ctx context.Context, id int64) error
+
+	// Cookie validation
+	UpdateValidation(ctx context.Context, id int64, status string, validationErr *string) error
+	GetExpiredAccounts(ctx context.Context) ([]*domain.Account, error)
+	GetAccountsByValidation(ctx context.Context, status string) ([]*domain.Account, error)
 }
