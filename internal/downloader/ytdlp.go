@@ -59,8 +59,8 @@ func (y *YtDlp) Download(ctx context.Context, dl *domain.Download) (string, erro
 		args = append(args, "--merge-output-format", "mp4")
 	}
 
-	// Cookies si hay cuenta asociada
-	if dl.AccountID != nil && y.accountRepo != nil {
+	// Cookies: siempre buscar cuenta activa para la plataforma
+	if y.accountRepo != nil {
 		account, err := y.accountRepo.GetActive(ctx, dl.Platform)
 		if err == nil && account != nil && account.CookiePath != "" {
 			args = append(args, "--cookies", account.CookiePath)

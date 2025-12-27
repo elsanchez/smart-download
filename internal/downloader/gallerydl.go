@@ -45,8 +45,8 @@ func (g *GalleryDl) Download(ctx context.Context, dl *domain.Download) (string, 
 		"-o", filenameBase + ".{extension}", // Output template
 	}
 
-	// Cookies si hay cuenta asociada
-	if dl.AccountID != nil && g.accountRepo != nil {
+	// Cookies: siempre buscar cuenta activa para la plataforma
+	if g.accountRepo != nil {
 		account, err := g.accountRepo.GetActive(ctx, dl.Platform)
 		if err == nil && account != nil && account.CookiePath != "" {
 			args = append(args, "--cookies", account.CookiePath)
