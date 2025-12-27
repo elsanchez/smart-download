@@ -37,6 +37,8 @@ func main() {
 		handleStats(c)
 	case "convert":
 		handleConvert(os.Args[2:])
+	case "cookies":
+		handleCookies(os.Args[2:])
 	case "version":
 		fmt.Printf("smd v%s\n", version)
 	case "help":
@@ -59,33 +61,45 @@ func printUsage() {
 Usage: smd <command> [args]
 
 Commands:
-  add <url> [options]  Add download to queue
-  convert <files...>   Convert local files to WhatsApp MP4
-  status <id>          Get download status
-  list [limit]         List recent downloads (default: 50)
-  stats                Show queue statistics
-  version              Show version
-  help                 Show this help
+  add <url> [options]    Add download to queue
+  convert <files...>     Convert local files to WhatsApp MP4
+  cookies <subcommand>   Manage authentication cookies
+  status <id>            Get download status
+  list [limit] [options] List recent downloads (default: 50, most recent first)
+  stats                  Show queue statistics
+  version                Show version
+  help                   Show this help
+
+List Options:
+  --details              Show error details for failed downloads
 
 Add Options:
-  --clip <start> <end>  Clip video segment (format: HH:MM:SS or seconds)
-  --gif [width]         Convert to GIF (default width: 480px)
-  --no-convert          Skip auto-conversion to WhatsApp MP4
-  --resolution <res>    Video resolution (1080p, 720p, 480p)
-  --audio-only          Extract audio only
+  --clip-start <time>  Start time for clipping (optional, format: 30s, 1m30s, or 00:01:30)
+  --clip-end <time>    End time for clipping (optional, format: 30s, 1m30s, or 00:01:30)
+  --gif [width]        Convert to GIF (default width: 480px)
+  --no-convert         Skip auto-conversion to WhatsApp MP4
+  --resolution <res>   Video resolution (1080p, 720p, 480p)
+  --audio-only         Extract audio only
+
+Clipping behavior:
+  --clip-start only    Clip from start time to end of video
+  --clip-end only      Clip from beginning to end time
+  Both flags           Clip from start time to end time
+  No flags             Download entire video
 
 Examples:
   smd add https://youtube.com/watch?v=xxx
-  smd add https://youtube.com/watch?v=xxx --clip 00:10 00:30
+  smd add https://youtube.com/watch?v=xxx --clip-start 10s --clip-end 30s
+  smd add https://youtube.com/watch?v=xxx --clip-start 1m
+  smd add https://youtube.com/watch?v=xxx --clip-end 30s
   smd add https://youtube.com/watch?v=xxx --gif 480
   smd add https://youtube.com/watch?v=xxx --no-convert
   smd https://youtube.com/watch?v=xxx          (shorthand for 'add')
   smd convert video.mp4
-  smd convert *.mp4
+  smd convert *.mp4 --clip-start 10s --clip-end 30s
   smd convert /path/to/videos/ --recursive
-  smd convert video.mp4 --clip-start 10 --clip-end 30
-  smd convert video.mp4 --clip-start 1m --clip-end 2m
-  smd convert video.mp4 --clip-start 30s --clip-end 1m30s
+  smd convert video.mp4 --clip-start 1m
+  smd convert video.mp4 --clip-end 2m
   smd status 123
   smd list 10
   smd stats`)
@@ -116,11 +130,8 @@ func handleAdd(c *client.Client, args []string) {
 		addFlags.Parse(args[1:])
 	}
 
-	// Validación de clip
-	if (*clipStart != "" && *clipEnd == "") || (*clipStart == "" && *clipEnd != "") {
-		fmt.Println("Error: Both --clip-start and --clip-end are required for clipping")
-		os.Exit(1)
-	}
+	// Validación de clip: al menos uno debe estar especificado si se quiere hacer clipping
+	// Both, one, or neither flag can be specified - ClipVideo handles all cases
 
 	// Construir options
 	options := make(map[string]interface{})
@@ -131,7 +142,7 @@ func handleAdd(c *client.Client, args []string) {
 	if *audioOnly {
 		options["audio_only"] = true
 	}
-	if *clipStart != "" && *clipEnd != "" {
+	if *clipStart != "" || *clipEnd != "" {
 		options["clip_start"] = *clipStart
 		options["clip_end"] = *clipEnd
 	}
@@ -205,12 +216,25 @@ func handleStatus(c *client.Client, args []string) {
 }
 
 func handleList(c *client.Client, args []string) {
+	// Parse flags
+	listFlags := flag.NewFlagSet("list", flag.ExitOnError)
+	details := listFlags.Bool("details", false, "Show error details for failed downloads")
+
+	// Find limit (first non-flag argument)
 	limit := 50
-	if len(args) > 0 {
-		if _, err := fmt.Sscanf(args[0], "%d", &limit); err != nil {
-			fmt.Printf("Error: Invalid limit: %s\n", args[0])
-			os.Exit(1)
+	var flagArgs []string
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-") {
+			flagArgs = append(flagArgs, arg)
+		} else {
+			if _, err := fmt.Sscanf(arg, "%d", &limit); err != nil {
+				fmt.Printf("Error: Invalid limit: %s\n", arg)
+				os.Exit(1)
+			}
 		}
+	}
+	if len(flagArgs) > 0 {
+		listFlags.Parse(flagArgs)
 	}
 
 	downloads, err := c.ListRecentDownloads(limit)
@@ -224,6 +248,7 @@ func handleList(c *client.Client, args []string) {
 		return
 	}
 
+	// Server already returns in DESC order (most recent first)
 	fmt.Printf("Recent downloads (%d):\n\n", len(downloads))
 
 	for _, dl := range downloads {
@@ -241,8 +266,11 @@ func handleList(c *client.Client, args []string) {
 			fmt.Printf("  Output: %s\n", outputPath)
 		}
 
-		if errMsg, ok := dl["error_message"].(string); ok && errMsg != "" {
-			fmt.Printf("  Error: %s\n", errMsg)
+		// Only show error if --details flag is set
+		if *details {
+			if errMsg, ok := dl["error_message"].(string); ok && errMsg != "" {
+				fmt.Printf("  Error: %s\n", errMsg)
+			}
 		}
 
 		fmt.Println()
@@ -313,11 +341,8 @@ func handleConvert(args []string) {
 		convertFlags.Parse(args[flagStartIdx:])
 	}
 
-	// Validación de clip
-	if (*clipStart != "" && *clipEnd == "") || (*clipStart == "" && *clipEnd != "") {
-		fmt.Println("Error: Both --clip-start and --clip-end are required for clipping")
-		os.Exit(1)
-	}
+	// Validación de clip: al menos uno debe estar especificado si se quiere hacer clipping
+	// Both, one, or neither flag can be specified - ClipVideo handles all cases
 
 	// Recolectar todos los archivos de video
 	videoFiles := collectVideoFiles(inputPaths, *recursive)
@@ -351,8 +376,18 @@ func handleConvert(args []string) {
 		currentFile := inputPath
 
 		// Hacer clip si se especificó
-		if *clipStart != "" && *clipEnd != "" {
-			fmt.Printf("  → Clipping segment (%s - %s)...\n", *clipStart, *clipEnd)
+		if *clipStart != "" || *clipEnd != "" {
+			// Generate description of clipping operation
+			var clipMsg string
+			if *clipStart != "" && *clipEnd != "" {
+				clipMsg = fmt.Sprintf("%s - %s", *clipStart, *clipEnd)
+			} else if *clipStart != "" {
+				clipMsg = fmt.Sprintf("%s - end", *clipStart)
+			} else {
+				clipMsg = fmt.Sprintf("0 - %s", *clipEnd)
+			}
+			fmt.Printf("  → Clipping segment (%s)...\n", clipMsg)
+
 			clippedPath, err := processor.ClipVideo(ctx, currentFile, *clipStart, *clipEnd)
 			if err != nil {
 				fmt.Printf("  ✗ Clipping failed: %v\n", err)
@@ -371,7 +406,7 @@ func handleConvert(args []string) {
 			continue
 		}
 
-		if compatible && *clipStart == "" {
+		if compatible && *clipStart == "" && *clipEnd == "" {
 			fmt.Printf("  ✓ Already compatible (H.264 + AAC)\n")
 			stats.compatible++
 			continue
@@ -392,12 +427,22 @@ func handleConvert(args []string) {
 		ext := filepath.Ext(baseName)
 		baseName = strings.TrimSuffix(baseName, ext)
 
-		// Agregar sufijo de clip si aplica
-		if *clipStart != "" && *clipEnd != "" {
-			// Limpiar caracteres especiales de los tiempos
-			start := strings.ReplaceAll(*clipStart, ":", "")
-			end := strings.ReplaceAll(*clipEnd, ":", "")
-			baseName = fmt.Sprintf("%s_clip_%s_%s", baseName, start, end)
+		// Agregar sufijo de clip si aplica (match ClipVideo naming)
+		if *clipStart != "" || *clipEnd != "" {
+			if *clipStart != "" && *clipEnd != "" {
+				// Both specified
+				start := strings.ReplaceAll(*clipStart, ":", "-")
+				end := strings.ReplaceAll(*clipEnd, ":", "-")
+				baseName = fmt.Sprintf("%s_clip_%s_%s", baseName, start, end)
+			} else if *clipStart != "" {
+				// Only start specified
+				start := strings.ReplaceAll(*clipStart, ":", "-")
+				baseName = fmt.Sprintf("%s_clip_%s_end", baseName, start)
+			} else {
+				// Only end specified
+				end := strings.ReplaceAll(*clipEnd, ":", "-")
+				baseName = fmt.Sprintf("%s_clip_0_%s", baseName, end)
+			}
 		}
 
 		if *outputDir != "" {

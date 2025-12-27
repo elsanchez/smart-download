@@ -339,37 +339,100 @@ func parseTimeToSeconds(timeStr string) (string, error) {
 }
 
 // ClipVideo extrae un segmento del video
+// startTime and endTime can be empty strings:
+// - Empty startTime → clip from beginning (0)
+// - Empty endTime → clip to end of video
 func (f *FFmpegProcessor) ClipVideo(ctx context.Context, inputPath, startTime, endTime string) (string, error) {
-	// Normalizar tiempos a segundos
-	startSeconds, err := parseTimeToSeconds(startTime)
+	// Get video info to validate times and get duration if needed
+	info, err := f.GetVideoInfo(ctx, inputPath)
 	if err != nil {
-		return "", fmt.Errorf("invalid start time: %w", err)
+		return "", fmt.Errorf("get video info: %w", err)
 	}
-	endSeconds, err := parseTimeToSeconds(endTime)
-	if err != nil {
-		return "", fmt.Errorf("invalid end time: %w", err)
+	videoDuration := info.Duration
+
+	// Handle empty start time (default to beginning)
+	var startSeconds string
+	var start float64
+	if startTime == "" {
+		startSeconds = "0"
+		start = 0
+	} else {
+		startSeconds, err = parseTimeToSeconds(startTime)
+		if err != nil {
+			return "", fmt.Errorf("invalid start time: %w", err)
+		}
+		start, _ = strconv.ParseFloat(startSeconds, 64)
 	}
+
+	// Validate start time doesn't exceed video duration
+	if start >= videoDuration {
+		return "", fmt.Errorf("start time %.1fs exceeds video duration %.1fs", start, videoDuration)
+	}
+
+	// Handle empty end time (default to end of video)
+	var endSeconds string
+	var end float64
+	if endTime == "" {
+		end = videoDuration
+		endSeconds = fmt.Sprintf("%.3f", videoDuration)
+	} else {
+		endSeconds, err = parseTimeToSeconds(endTime)
+		if err != nil {
+			return "", fmt.Errorf("invalid end time: %w", err)
+		}
+		end, _ = strconv.ParseFloat(endSeconds, 64)
+	}
+
+	// Validate end time
+	if end > videoDuration {
+		return "", fmt.Errorf("end time %.1fs exceeds video duration %.1fs", end, videoDuration)
+	}
+	if end <= start {
+		return "", fmt.Errorf("end time (%.1fs) must be greater than start time (%.1fs)", end, start)
+	}
+
+	// Calcular duración (end - start)
+	duration := end - start
+	durationStr := fmt.Sprintf("%.3f", duration)
 
 	// Generar path de salida
 	ext := filepath.Ext(inputPath)
 	base := strings.TrimSuffix(inputPath, ext)
 
-	// Limpiar timestamps para nombre de archivo (usar formato original)
-	startClean := strings.ReplaceAll(startTime, ":", "-")
-	endClean := strings.ReplaceAll(endTime, ":", "-")
-	outputPath := fmt.Sprintf("%s_clip_%s_%s%s", base, startClean, endClean, ext)
+	// Generate output filename based on provided times
+	var outputPath string
+	if startTime == "" && endTime == "" {
+		// Both empty → shouldn't happen, but handle gracefully
+		outputPath = fmt.Sprintf("%s_clip%s", base, ext)
+	} else if startTime == "" {
+		// Only end time specified
+		endClean := strings.ReplaceAll(endTime, ":", "-")
+		outputPath = fmt.Sprintf("%s_clip_0_%s%s", base, endClean, ext)
+	} else if endTime == "" {
+		// Only start time specified
+		startClean := strings.ReplaceAll(startTime, ":", "-")
+		outputPath = fmt.Sprintf("%s_clip_%s_end%s", base, startClean, ext)
+	} else {
+		// Both specified
+		startClean := strings.ReplaceAll(startTime, ":", "-")
+		endClean := strings.ReplaceAll(endTime, ":", "-")
+		outputPath = fmt.Sprintf("%s_clip_%s_%s%s", base, startClean, endClean, ext)
+	}
 
-	args := []string{
+	// Build FFmpeg args - only add -ss if start > 0
+	args := []string{}
+	if start > 0 {
+		args = append(args, "-ss", startSeconds)
+	}
+	args = append(args,
 		"-i", inputPath,
-		"-ss", startSeconds,
-		"-to", endSeconds,
+		"-t", durationStr,
 		"-hide_banner",
 		"-loglevel", "error",
-		"-c", "copy", // Stream copy (sin re-encodear)
-		"-avoid_negative_ts", "make_zero",
+		"-c", "copy",
 		"-y",
 		outputPath,
-	}
+	)
 
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	output, err := cmd.CombinedOutput()
